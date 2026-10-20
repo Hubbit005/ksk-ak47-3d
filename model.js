@@ -27,6 +27,30 @@ export const LABELS = {
   cleaningRod: 'WYCIOR',
 };
 
+// Krótkie opisy funkcji części (karta po najechaniu).
+export const INFO = {
+  receiver: 'Główny korpus broni. Łączy wszystkie zespoły, mieści mechanizm spustowy i prowadzi suwadło z zamkiem.',
+  cover: 'Osłania wnętrze komory zamkowej przed brudem i kurzem. Przy rozkładaniu zdejmuje się ją jako pierwszą po magazynku.',
+  stock: 'Drewniana kolba. Opiera się o ramię strzelca i stabilizuje broń podczas strzelania.',
+  grip: 'Chwyt pistoletowy. Trzyma się go dłonią strzelającą, a palec wskazujący trafia wtedy naturalnie na spust.',
+  handguard: 'Drewniane łoże pod lufą. Miejsce na dłoń podtrzymującą broń; chroni ją przed nagrzaną lufą.',
+  upperHandguard: 'Drewniana nakładka na rurze gazowej. Chroni dłoń przed ciepłem i poprawia chwyt.',
+  gasTube: 'Rura gazowa. Prowadzi tłok suwadła — to w niej gazy prochowe napędzają automatykę broni.',
+  barrel: 'Lufa. Nadaje pociskowi kierunek i prędkość. Na lufie osadzone są blok gazowy, muszka i hamulec wylotowy.',
+  frontSight: 'Muszka. Przedni element przyrządów celowniczych — razem ze szczerbinką celownika tworzy linię celowania.',
+  rearSight: 'Celownik krzywkowy z suwakiem. Na podziałce ustawia się odległość do celu, a szczerbinka wyznacza linię celowania.',
+  magazine: 'Magazynek pudełkowy. Przechowuje naboje i podaje je do komory. Charakterystyczny, wygięty kształt.',
+  triggerGuard: 'Kabłąk spustowy. Chroni spust przed przypadkowym naciśnięciem.',
+  trigger: 'Spust. Jego ściągnięcie zwalnia kurek i oddaje strzał.',
+  selector: 'Przełącznik rodzaju ognia: góra — zabezpieczony, środek — ogień ciągły, dół — ogień pojedynczy.',
+  chargingHandle: 'Rączka zamka. Połączona z suwadłem — służy do ręcznego przeładowania broni.',
+  muzzleBrake: 'Hamulec wylotowy. Kieruje część gazów wylotowych, ograniczając podrzut i znoszenie lufy.',
+  carrier: 'Suwadło z tłokiem gazowym. Pod naporem gazów cofa się, otwiera zamek i przeładowuje broń.',
+  bolt: 'Zamek. Dosyła nabój do komory i zamyka ją w chwili strzału, obracając się przy ryglowaniu.',
+  spring: 'Zespół sprężyny powrotnej. Po strzale przesuwa suwadło z zamkiem z powrotem do przodu.',
+  cleaningRod: 'Wycior. Pręt do czyszczenia lufy, przechowywany pod lufą.',
+};
+
 const PI = Math.PI;
 const lerp = (a, b, t) => a + (b - a) * t;
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -168,6 +192,7 @@ function makeMaterials(tex) {
     normalMap: tex.metal.normal, normalScale: new THREE.Vector2(0.35, 0.35),
   };
   const metal = new THREE.MeshPhysicalMaterial({ ...steel, color: 0x5a5e65, roughness: 0.46, clearcoat: 0.15, clearcoatRoughness: 0.5 });
+  metal.userData.wear = 1;
   const dark = metal.clone();
   dark.color.set(0x3a3d42);
   dark.roughness = 0.6;
@@ -187,11 +212,30 @@ function makeMaterials(tex) {
     normalScale: new THREE.Vector2(0.25, 0.25), roughness: 0.6, metalness: 0,
     clearcoat: 0.55, clearcoatRoughness: 0.28, sheen: 0.2, sheenRoughness: 0.6, sheenColor: new THREE.Color(0x6a2a10),
   });
-  const grip = wood.clone();
-  grip.color.set(0xb88a78);
+  // chwyt z brązowego tworzywa (bakelit)
+  const grip = new THREE.MeshPhysicalMaterial({
+    color: 0x4a2216, roughness: 0.42, metalness: 0, clearcoat: 0.4, clearcoatRoughness: 0.35,
+    normalMap: tex.metal.normal, normalScale: new THREE.Vector2(0.25, 0.25),
+  });
   const black = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.9 });
   const scale = new THREE.MeshStandardMaterial({ map: tex.sightScale, metalness: 0.5, roughness: 0.5 });
   return { metal, dark, cover, bright, blued, wood, grip, black, scale };
+}
+
+// Przetarcia na krawędziach: tam, gdzie normalna szybko się zmienia (fazy, zaokrąglenia),
+// stal jest jaśniejsza i gładsza — jak wytarta oksyda na prawdziwej broni.
+const wornMaterials = new WeakSet();
+function addEdgeWear(mat) {
+  if (wornMaterials.has(mat)) return;
+  wornMaterials.add(mat);
+  mat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      float curv = length(fwidth(vNormal)) / max(length(fwidth(vViewPosition)), 1e-5);
+      float edgeWear = smoothstep(45.0, 140.0, curv);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.58, 0.59, 0.62), edgeWear * 0.55);
+      roughnessFactor = mix(roughnessFactor, 0.2, edgeWear);`);
+  };
+  mat.customProgramCacheKey = () => 'edgewear';
 }
 
 // ---------------------------------------------------------------- budowa
@@ -247,17 +291,22 @@ export function buildAK(tex) {
     add(g, box(0.22, 0.46, 2 * Wi), mt, 1.04, -0.17, 0);
     add(g, box(0.2, 0.44, 2 * Wi), mt, -1.8, -0.18, 0);
     for (const s of [-1, 1]) add(g, box(2.4, 0.018, 0.02), dk, -0.35, 0.045, s * (Wi - 0.01));
-    // frezowane wybrania po obu stronach (nad gniazdem magazynka) i stopnie przy przednim elemencie
-    const pocket = roundRect(0.1, -0.255, 0.84, -0.095, 0.05);
-    const frame = roundRect(0.08, -0.275, 0.86, -0.075, 0.06);
-    frame.holes.push(pocket);
+    // tłoczona komora AKM: wytłoczenie prowadzące magazynek, nity przedniego i tylnego elementu
+    const dimple = new THREE.MeshPhysicalMaterial({
+      color: M.blued.color, metalness: M.blued.metalness, roughness: M.blued.roughness,
+      normalMap: tex.dimple, normalScale: new THREE.Vector2(1.6, 1.6), polygonOffset: true, polygonOffsetFactor: -2,
+    });
+    const rivet = new THREE.SphereGeometry(0.024, 16, 8, 0, PI * 2, 0, PI / 2).rotateX(PI / 2).scale(1, 1, 0.45);
+    const rivets = [[0.93, -0.04], [1.08, -0.04], [0.93, -0.32], [1.08, -0.32], [1.005, -0.18],
+      [-1.72, -0.05], [-1.86, -0.05], [-1.79, -0.31], [-1.25, -0.22]];
     for (const s of [-1, 1]) {
-      add(g, extrude(frame, 0.008, 0, 16), mt, 0, 0, s * (W + 0.002));
-      const floor = add(g, new THREE.ShapeGeometry(pocket, 16), dk, 0, 0, s * (W - 0.002));
-      if (s < 0) floor.rotation.y = PI;
-      floor.receiveShadow = true;
-      add(g, box(0.22, 0.46, 0.008), mt, 1.04, -0.17, s * (W + 0.003));
-      add(g, box(0.16, 0.42, 0.008), mt, -1.8, -0.18, s * (W + 0.003));
+      const d = add(g, new THREE.PlaneGeometry(0.66, 0.24), dimple, 0.47, -0.2, s * (W + 0.0012));
+      if (s < 0) d.rotation.y = PI;
+      d.castShadow = false;
+      for (const [x, y] of rivets) {
+        const r = add(g, rivet, mt, x, y, s * W);
+        if (s < 0) r.rotation.y = PI;
+      }
     }
     // sworznie mechanizmu spustowego i zatrzask magazynka
     pinHead(g, M.bright.clone(), -0.04, -0.3);
@@ -299,7 +348,9 @@ export function buildAK(tex) {
     add(g, extrude(rear, 0.025, 0.006, 40).rotateY(PI / 2), mt, -len + 0.02, 0, 0);
     // przetłoczenie usztywniające na górze i zawinięta krawędź z tyłu
     add(g, extrude(arch(0.153, 0.149), 0.06, 0.004, 40).rotateY(PI / 2), mt, -len + 0.06, 0, 0);
-    add(g, box(0.28, 0.012, 0.04), mt, -2.35, cy + 0.15, 0);
+    for (let i = 0; i < 6; i++) {
+      add(g, extrude(arch(0.157, 0.149), 0.028, 0.006, 40).rotateY(PI / 2), mt, -2.72 + i * 0.17, 0, 0);
+    }
   }
 
   // ======================================================== KOLBA (drewno)
@@ -333,6 +384,12 @@ export function buildAK(tex) {
     const B = bezier([-0.97, -0.405], [-1.13, -0.6], [-1.17, -0.96], [-1.23, -1.31]);
     const w = (s) => 0.1 + 0.025 * Math.sin(PI * Math.min(1, s * 1.05));
     add(g, loft({ A, B, w, e: () => 2.7, n: 32, radial: 40 }), M.grip.clone());
+    // poprzeczne rowki na przedniej krawędzi chwytu
+    for (let i = 0; i < 7; i++) {
+      const s0 = 0.18 + i * 0.1, p = A(s0), q = B(s0);
+      const groove = add(g, box(0.012, 0.012, 2 * w(s0) * 0.92), M.grip, p[0] - 0.004 + (q[0] - p[0]) * 0.02, p[1], 0);
+      groove.rotation.z = Math.atan2(q[1] - p[1], q[0] - p[0]);
+    }
     add(g, box(0.36, 0.03, 0.2), M.dark.clone(), -0.74, -0.415, 0);
   }
 
@@ -581,6 +638,7 @@ export function buildAK(tex) {
   }
 
   root.traverse((o) => {
+    if (o.isMesh && o.material.userData && o.material.userData.wear) addEdgeWear(o.material);
     if (o.userData.part) {
       o.userData.basePos = o.position.clone();
       o.userData.baseRot = o.rotation.clone();

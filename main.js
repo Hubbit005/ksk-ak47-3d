@@ -5,8 +5,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { woodTextures, metalTextures, sightScaleTexture, flashTextures, floorAlpha, studioEnvironment } from './textures.js';
-import { buildAK } from './model.js';
+import { woodTextures, metalTextures, sightScaleTexture, dimpleNormal, flashTextures, floorAlpha, studioEnvironment } from './textures.js';
+import { buildAK, INFO } from './model.js';
 import { STEPS, applyPose, computeLabels } from './disassembly.js';
 import { setupPhotoMode } from './photo.js';
 
@@ -122,7 +122,7 @@ scene.add(floor);
 
 // ---------------------------------------------------------------- model
 const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-const ak = buildAK({ wood: woodTextures(aniso), metal: metalTextures(aniso), sightScale: sightScaleTexture() });
+const ak = buildAK({ wood: woodTextures(aniso), metal: metalTextures(aniso), sightScale: sightScaleTexture(), dimple: dimpleNormal() });
 scene.add(ak.root);
 const pickables = [];
 ak.root.traverse((o) => o.isMesh && pickables.push(o));
@@ -313,17 +313,69 @@ function setHover(g) {
   const tip = $('tooltip');
   if (g) {
     const id = g.userData.part.id;
-    const extra = INTERACTIVE.has(id) ? '<small>KLIKNIJ</small>' : '';
-    tip.innerHTML = g.userData.part.label + extra;
+    const hint = INTERACTIVE.has(id) ? '<div class="hint">KLIKNIJ, ABY UŻYĆ</div>' : '';
+    const img = thumbs[id] ? `<img src="${thumbs[id]}" alt="">` : '';
+    tip.innerHTML = `${img}<div class="body"><div class="name">${g.userData.part.label}</div><div class="desc">${INFO[id] || ''}</div>${hint}</div>`;
     tip.classList.add('show');
   } else tip.classList.remove('show');
   renderer.domElement.style.cursor = g && INTERACTIVE.has(g.userData.part.id) ? 'pointer' : 'grab';
 }
 function moveTooltip(x, y) {
   const tip = $('tooltip');
-  const w = tip.offsetWidth;
-  const nx = Math.min(innerWidth - w - 8, x + 16);
-  tip.style.transform = `translate(${nx}px, ${Math.max(8, y - 44)}px)`;
+  const w = tip.offsetWidth, h = tip.offsetHeight, m = 10;
+  let nx = x + 22, ny = y - h / 2;
+  if (nx + w > innerWidth - m) nx = x - w - 22;
+  nx = Math.max(m, Math.min(innerWidth - w - m, nx));
+  ny = Math.max(m, Math.min(innerHeight - h - m, ny));
+  tip.style.transform = `translate(${nx}px, ${ny}px)`;
+}
+
+// ---------------------------------------------------------------- miniatury części (zbliżenia do karty)
+const thumbs = {};
+const ISOLATE = new Set(['carrier', 'bolt', 'spring', 'chargingHandle']);
+const THUMB_W = 320, THUMB_H = 190;
+function makeThumbnails() {
+  const cam = new THREE.PerspectiveCamera(28, THUMB_W / THUMB_H, 0.05, 60);
+  const tanH = Math.tan(THREE.MathUtils.degToRad(14)) * cam.aspect, tanV = Math.tan(THREE.MathUtils.degToRad(14));
+  const pr = renderer.getPixelRatio();
+  const out = document.createElement('canvas');
+  out.width = THUMB_W;
+  out.height = THUMB_H;
+  const g2 = out.getContext('2d');
+  const hidden = [];
+  scene.traverse((o) => { if (o.userData.noAO && o.visible) { hidden.push(o); o.visible = false; } });
+  const fogNear = scene.fog.near, fogFar = scene.fog.far;
+  scene.fog.near = 30;
+  scene.fog.far = 60;
+  renderer.setPixelRatio(1);
+  renderer.setSize(THUMB_W, THUMB_H, false);
+  const box = new THREE.Box3(), c = new THREE.Vector3(), size = new THREE.Vector3();
+  const meshes = [];
+  ak.root.traverse((o) => o.isMesh && meshes.push(o));
+  const under = (o, g) => { for (let p = o; p; p = p.parent) if (p === g) return true; return false; };
+  for (const [id, g] of Object.entries(ak.parts)) {
+    const iso = ISOLATE.has(id);
+    if (iso) for (const m of meshes) m.visible = under(m, g);
+    box.setFromObject(g);
+    box.getCenter(c);
+    box.getSize(size);
+    const rx = Math.max(size.x * 0.5, 0.22) * (iso ? 1.1 : 1.2);
+    const ry = Math.max(size.y * 0.5, 0.16) * (iso ? 1.25 : 1.35);
+    const dist = Math.max(rx / tanH, ry / tanV) + size.z * 0.5;
+    const dir = new THREE.Vector3(0.38, 0.3, 1).normalize();
+    cam.position.copy(c).addScaledVector(dir, dist);
+    cam.lookAt(c);
+    renderer.render(scene, cam);
+    g2.drawImage(renderer.domElement, 0, 0, THUMB_W, THUMB_H);
+    thumbs[id] = out.toDataURL('image/jpeg', 0.86);
+    if (iso) for (const m of meshes) m.visible = true;
+  }
+  thumbs.upperHandguard = thumbs.upperHandguard || thumbs.gasTube;
+  for (const o of hidden) o.visible = true;
+  scene.fog.near = fogNear;
+  scene.fog.far = fogFar;
+  renderer.setPixelRatio(pr);
+  renderer.setSize(innerWidth, innerHeight, false);
 }
 
 const raycaster = new THREE.Raycaster();
@@ -361,7 +413,7 @@ el.addEventListener('pointerup', (e) => {
     setHover(g);
     if (g) moveTooltip(e.clientX, e.clientY);
     clearTimeout(tapTimer);
-    tapTimer = setTimeout(() => setHover(null), 1600);
+    tapTimer = setTimeout(() => setHover(null), 3500);
   }
   if (!g) return;
   const id = g.userData.part.id;
@@ -513,7 +565,8 @@ function frame() {
   syncSlider();
   syncCaption();
 
-  if (++frames === 2) $('loading').classList.add('hide');
+  if (++frames === 1) makeThumbnails();
+  if (frames === 3) $('loading').classList.add('hide');
 }
 
 addEventListener('resize', () => {

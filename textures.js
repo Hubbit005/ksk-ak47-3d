@@ -77,16 +77,17 @@ export function woodTextures(maxAniso = 8) {
   const ia = a.createImageData(W, H), ib = b.createImageData(W, H);
   const height = new Float32Array(W * H);
   const n1 = makeNoise(7), n2 = makeNoise(13), n3 = makeNoise(29), n4 = makeNoise(41);
-  const light = [150, 72, 36], mid = [110, 46, 22], dark = [62, 25, 12];
+  const light = [156, 92, 52], mid = [108, 58, 30], dark = [56, 28, 14];
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const k = y * W + x;
-      const warp = (n1(x * 0.0035, y * 0.009) * 2 - 1) * 34 + (n4(x * 0.012, y * 0.02) * 2 - 1) * 6;
-      const ring = 0.5 + 0.5 * Math.sin((y + warp) * 0.3);
+      const warp = (n1(x * 0.0025, y * 0.006) * 2 - 1) * 5 + (n4(x * 0.01, y * 0.02) * 2 - 1) * 1.5;
+      const ring = 0.5 + 0.5 * Math.sin((y + warp) * 0.55);
       const lines = Math.pow(ring, 5);
       const pores = n3(x * 0.06, y * 1.1);
       const big = n2(x * 0.002 + 10, y * 0.008);
-      let t = 0.36 + lines * 0.18 + (pores - 0.5) * 0.12 + (big - 0.5) * 0.5;
+      const band = n4(x * 0.0012 + 3, y * 0.035);
+      let t = 0.32 + lines * 0.15 + (pores - 0.5) * 0.16 + (big - 0.5) * 0.35 + (band - 0.5) * 0.45;
       t = Math.min(1, Math.max(0, t));
       const c0 = t < 0.5 ? light : mid, c1 = t < 0.5 ? mid : dark, tt = t < 0.5 ? t * 2 : t * 2 - 1;
       const i = k * 4;
@@ -143,6 +144,22 @@ export function metalTextures(maxAniso = 8) {
   const normal = wrapTex(normalFromHeight(height, S, S, 0.35), maxAniso, false);
   for (const t of [map, rough, normal]) t.repeat.set(2, 2);
   return { map, rough, normal };
+}
+
+// Mapa normalnych owalnego wytłoczenia na boku komory (prowadnica magazynka AKM).
+export function dimpleNormal() {
+  const W = 256, H = 96;
+  const h = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const dx = (x - W / 2) / (W * 0.42), dy = (y - H / 2) / (H * 0.36);
+      const d = Math.sqrt(dx * dx + dy * dy);
+      h[y * W + x] = -Math.pow(Math.max(0, 1 - d * d), 1.2) * 6;
+    }
+  }
+  const t = new THREE.CanvasTexture(normalFromHeight(h, W, H, 1));
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
 }
 
 // Podziałka na ramieniu celownika (nastawy П i 1–10).
