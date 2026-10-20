@@ -38,13 +38,13 @@ Potem w przeglądarce: <http://localhost:8000>. Potrzebny jest internet (three.j
 ## Struktura
 
 ```
-index.html        interfejs
-css/style.css     styl KSK Pretor (czerń, czerwień #C82323, fonty Anton i Barlow)
-js/main.js        scena, światła, interakcje, pętla renderowania
-js/model.js       budowa modelu z części
-js/disassembly.js rozkładanie, podpisy części
-js/photo.js       tryb zdjęcia i eksport PNG
-js/textures.js    tekstury drewna i metalu, błysk, odbicia studyjne
+index.html        interfejs (wszystkie pliki leżą w katalogu głównym)
+style.css         styl KSK Pretor (czerń, czerwień #C82323, fonty Anton i Barlow)
+main.js        scena, światła, interakcje, pętla renderowania
+model.js       budowa modelu z części
+disassembly.js rozkładanie, podpisy części
+photo.js       tryb zdjęcia i eksport PNG
+textures.js    tekstury drewna i metalu, błysk, odbicia studyjne
 ```
 
 Na telefonach strona sama zmniejsza rozdzielczość renderowania i cieni oraz wyłącza odbicie w podłodze.

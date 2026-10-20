@@ -10,14 +10,14 @@ const FORMATS = {
 // dir — kierunek od celu do kamery, rx/ry — połówki kadru w jednostkach świata.
 const SHOTS = [
   { name: 'BOK', dir: [0, 0.07, 1], target: [0.6, -0.45, 0], rx: 5.4, ry: 2.0 },
-  { name: '3/4 PRZÓD', dir: [0.78, 0.3, 0.6], target: [0.7, -0.5, 0], rx: 3.1, ry: 1.9 },
+  { name: '3/4 PRZÓD', dir: [0.78, 0.3, 0.6], target: [0.8, -0.6, 0], rx: 3.7, ry: 2.2 },
   { name: 'Z GÓRY · ROZŁOŻONY', dir: [0.1, 0.62, 0.78], target: [0.45, 0.45, -0.8], rx: 5.4, ry: 3.3, explode: true },
   { name: 'KOMORA', dir: [0.38, 0.35, 1], target: [-0.35, -0.1, 0], rx: 1.6, ry: 1.0 },
   { name: 'OD DOŁU', dir: [0.5, -0.1, 0.86], target: [1.3, -0.2, 0], rx: 4.8, ry: 2.4 },
 ];
 
 export function setupPhotoMode(ctx) {
-  const { renderer, scene, camera, controls, state, ak, $, flyTo, setExplodeTarget, showFlash, setHover } = ctx;
+  const { renderer, camera, controls, state, ak, $, flyTo, renderFrame, setRenderSize, setExplodeTarget, showFlash, setHover } = ctx;
   let format = 'post';
   const frame = { x: 0, y: 0, w: 100, h: 100 };
 
@@ -142,14 +142,13 @@ export function setupPhotoMode(ctx) {
   function renderExport(W, H) {
     const vw = innerWidth, vh = innerHeight;
     const pr = renderer.getPixelRatio();
-    renderer.setPixelRatio(1);
-    renderer.setSize(W, H, false);
+    setRenderSize(W, H, 1);
     camera.aspect = vw / vh;
     camera.setViewOffset(vw, vh, frame.x, frame.y, frame.w, frame.h);
     camera.updateProjectionMatrix();
     camera.lookAt(controls.target);
     showFlash(state.photoFlash, 1);
-    renderer.render(scene, camera);
+    renderFrame();
 
     const out = document.createElement('canvas');
     out.width = W;
@@ -172,8 +171,7 @@ export function setupPhotoMode(ctx) {
     camera.clearViewOffset();
     camera.aspect = vw / vh;
     camera.updateProjectionMatrix();
-    renderer.setPixelRatio(pr);
-    renderer.setSize(vw, vh, false);
+    setRenderSize(vw, vh, pr);
     return out;
   }
 

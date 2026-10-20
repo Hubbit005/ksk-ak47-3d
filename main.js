@@ -1,14 +1,18 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
-import { woodTexture, metalTextures, flashTextures, floorAlpha, studioEnvironment } from './textures.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { woodTextures, metalTextures, sightScaleTexture, flashTextures, floorAlpha, studioEnvironment } from './textures.js';
 import { buildAK } from './model.js';
 import { STEPS, applyPose, computeLabels } from './disassembly.js';
 import { setupPhotoMode } from './photo.js';
 
 const RED = 0xc82323;
 const BG = 0x0a0a0a;
-const FLOOR_Y = -2.45;
+const FLOOR_Y = -3.0;
 const STEP_COUNT = STEPS.length;
 const SELECTOR = [
   { name: 'ZABEZPIECZONY', angle: 0 },
@@ -71,13 +75,13 @@ key.position.set(3, 9, 6);
 key.target.position.set(0.5, -0.6, 0);
 key.castShadow = true;
 key.shadow.mapSize.set(isMobile ? 1024 : 2048, isMobile ? 1024 : 2048);
-Object.assign(key.shadow.camera, { left: -7.5, right: 7.5, top: 7.5, bottom: -7.5, near: 1, far: 30 });
+Object.assign(key.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 2, far: 24 });
 key.shadow.radius = isMobile ? 3 : 7;
 key.shadow.bias = -0.0004;
 key.shadow.normalBias = 0.02;
 scene.add(key, key.target);
 
-const fill = new THREE.DirectionalLight(0xdfe6ff, 0.55);
+const fill = new THREE.DirectionalLight(0xdfe6ff, 0.8);
 fill.position.set(-7, 2, 6);
 scene.add(fill);
 
@@ -101,6 +105,7 @@ if (!isMobile) {
   });
   mirror.rotation.x = -Math.PI / 2;
   mirror.position.y = FLOOR_Y;
+  mirror.userData.noAO = true;
   scene.add(mirror);
 }
 const floor = new THREE.Mesh(
@@ -117,7 +122,7 @@ scene.add(floor);
 
 // ---------------------------------------------------------------- model
 const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-const ak = buildAK({ wood: woodTexture(aniso), metal: metalTextures(aniso) });
+const ak = buildAK({ wood: woodTextures(aniso), metal: metalTextures(aniso), sightScale: sightScaleTexture() });
 scene.add(ak.root);
 const pickables = [];
 ak.root.traverse((o) => o.isMesh && pickables.push(o));
@@ -144,6 +149,7 @@ const flashLight = new THREE.PointLight(0xff5a48, 0, 9, 1.4);
 flashLight.position.x = 0.4;
 flash.add(flashLight);
 flash.visible = false;
+flash.userData.noAO = true;
 scene.add(flash);
 
 function showFlash(on, strength = 1) {
@@ -154,6 +160,40 @@ function showFlash(on, strength = 1) {
     const s = 0.85 + Math.random() * 0.35;
     stars.scale.set(s * strength, s, s);
     flashCore.scale.setScalar(1.1 + Math.random() * 0.4);
+  }
+}
+
+// ---------------------------------------------------------------- postprocessing (AO tylko na komputerze)
+let composer = null, gtao = null;
+if (!isMobile) {
+  const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+  composer = new EffectComposer(renderer, rt);
+  composer.addPass(new RenderPass(scene, camera));
+  gtao = new GTAOPass(scene, camera, innerWidth, innerHeight);
+  gtao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.5, thickness: 1.5, scale: 1.2, samples: 16 });
+  gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
+  gtao.blendIntensity = 0.9;
+  // błysk i lustro podłogi nie biorą udziału w AO (lustro renderowałoby się wtedy podwójnie)
+  const baseOverride = gtao.overrideVisibility.bind(gtao);
+  gtao.overrideVisibility = () => {
+    baseOverride();
+    scene.traverse((o) => { if (o.userData.noAO) o.visible = false; });
+  };
+  composer.addPass(gtao);
+  composer.addPass(new OutputPass());
+  composer.setPixelRatio(renderer.getPixelRatio());
+  composer.setSize(innerWidth, innerHeight);
+}
+function renderFrame() {
+  if (composer) composer.render();
+  else renderer.render(scene, camera);
+}
+function setRenderSize(w, h, pixelRatio) {
+  renderer.setPixelRatio(pixelRatio);
+  renderer.setSize(w, h, false);
+  if (composer) {
+    composer.setPixelRatio(pixelRatio);
+    composer.setSize(w, h);
   }
 }
 
@@ -403,7 +443,7 @@ function flyTo(pos, target, dur = 1.2) {
 
 // ---------------------------------------------------------------- tryb zdjęcia
 const photo = setupPhotoMode({
-  renderer, scene, camera, controls, state, ak, $, flyTo, setExplodeTarget, showFlash, setHover,
+  renderer, scene, camera, controls, state, ak, $, flyTo, renderFrame, setRenderSize, setExplodeTarget, showFlash, setHover,
   stepCount: STEP_COUNT, floorY: FLOOR_Y,
 });
 $('btnPhoto').addEventListener('click', () => photo.enter());
@@ -466,7 +506,7 @@ function frame() {
   scene.fog.far = camDist + 24;
 
   camera.lookAt(controls.target);
-  renderer.render(scene, camera);
+  renderFrame();
   camera.position.sub(shakeOffset);
 
   updateLabels();
@@ -480,6 +520,7 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  if (composer) composer.setSize(innerWidth, innerHeight);
   photo.layout();
 });
 

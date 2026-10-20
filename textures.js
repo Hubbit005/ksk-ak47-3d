@@ -39,72 +39,132 @@ function canvas(w, h) {
   return c;
 }
 
-export function woodTexture(maxAniso = 8) {
-  const W = 1024, H = 512;
+// Wysokość → mapa normalnych (różnice skończone, zawijanie na brzegach).
+function normalFromHeight(h, W, H, strength) {
   const c = canvas(W, H);
   const ctx = c.getContext('2d');
   const img = ctx.createImageData(W, H);
-  const n1 = makeNoise(7), n2 = makeNoise(13), n3 = makeNoise(29);
-  const light = [150, 78, 38], dark = [82, 38, 17];
-  let i = 0;
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      const warp = (n1(x * 0.004, y * 0.012) * 2 - 1) * 22 + (n1(x * 0.013 + 40, y * 0.03) * 2 - 1) * 5;
-      const ring = 0.5 + 0.5 * Math.sin((y + warp) * 0.34 + n2(x * 0.002, y * 0.004) * 7);
-      const r4 = ring * ring * ring * ring * (0.45 + 0.55 * n1(x * 0.006 + 7, y * 0.02));
-      const pores = n3(x * 0.035, y * 0.9);
-      const big = n2(x * 0.0016 + 10, y * 0.005 + 3);
-      let t = r4 * 0.32 + pores * 0.2 + big * 0.5 - 0.02;
-      t = Math.min(1, Math.max(0, t));
-      img.data[i++] = light[0] + (dark[0] - light[0]) * t;
-      img.data[i++] = light[1] + (dark[1] - light[1]) * t;
-      img.data[i++] = light[2] + (dark[2] - light[2]) * t;
-      img.data[i++] = 255;
+      const l = h[y * W + ((x - 1 + W) % W)], r = h[y * W + ((x + 1) % W)];
+      const u = h[((y - 1 + H) % H) * W + x], d = h[((y + 1) % H) * W + x];
+      let nx = (l - r) * strength, ny = (d - u) * strength, nz = 1;
+      const len = Math.hypot(nx, ny, nz);
+      const i = (y * W + x) * 4;
+      img.data[i] = (nx / len * 0.5 + 0.5) * 255;
+      img.data[i + 1] = (ny / len * 0.5 + 0.5) * 255;
+      img.data[i + 2] = (nz / len * 0.5 + 0.5) * 255;
+      img.data[i + 3] = 255;
     }
   }
   ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  // UV-ki w jednostkach świata: 1 tekstura ≈ 2 x 1.35 jednostki
-  tex.repeat.set(0.5, 0.74);
-  tex.anisotropy = maxAniso;
-  return tex;
+  return c;
 }
 
-// Lekka oksyda: drobne przebarwienia i zmienna szorstkość.
+function wrapTex(c, aniso, srgb) {
+  const t = new THREE.CanvasTexture(c);
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = aniso;
+  return t;
+}
+
+// Bejcowane, lakierowane drewno (brzoza/laminat jak w kolbach AK): kolor, szorstkość, normalne.
+export function woodTextures(maxAniso = 8) {
+  const W = 1024, H = 512;
+  const cMap = canvas(W, H), cRough = canvas(W, H);
+  const a = cMap.getContext('2d'), b = cRough.getContext('2d');
+  const ia = a.createImageData(W, H), ib = b.createImageData(W, H);
+  const height = new Float32Array(W * H);
+  const n1 = makeNoise(7), n2 = makeNoise(13), n3 = makeNoise(29), n4 = makeNoise(41);
+  const light = [150, 72, 36], mid = [110, 46, 22], dark = [62, 25, 12];
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const k = y * W + x;
+      const warp = (n1(x * 0.0035, y * 0.009) * 2 - 1) * 34 + (n4(x * 0.012, y * 0.02) * 2 - 1) * 6;
+      const ring = 0.5 + 0.5 * Math.sin((y + warp) * 0.3);
+      const lines = Math.pow(ring, 5);
+      const pores = n3(x * 0.06, y * 1.1);
+      const big = n2(x * 0.002 + 10, y * 0.008);
+      let t = 0.36 + lines * 0.18 + (pores - 0.5) * 0.12 + (big - 0.5) * 0.5;
+      t = Math.min(1, Math.max(0, t));
+      const c0 = t < 0.5 ? light : mid, c1 = t < 0.5 ? mid : dark, tt = t < 0.5 ? t * 2 : t * 2 - 1;
+      const i = k * 4;
+      ia.data[i] = c0[0] + (c1[0] - c0[0]) * tt;
+      ia.data[i + 1] = c0[1] + (c1[1] - c0[1]) * tt;
+      ia.data[i + 2] = c0[2] + (c1[2] - c0[2]) * tt;
+      ia.data[i + 3] = 255;
+      const rv = 0.55 + lines * 0.25 + (pores - 0.5) * 0.25;
+      ib.data[i] = ib.data[i + 1] = ib.data[i + 2] = 255 * Math.min(1, Math.max(0, rv));
+      ib.data[i + 3] = 255;
+      height[k] = lines * 0.5 + pores * 0.15;
+    }
+  }
+  a.putImageData(ia, 0, 0);
+  b.putImageData(ib, 0, 0);
+  const map = wrapTex(cMap, maxAniso, true);
+  const roughnessMap = wrapTex(cRough, maxAniso, false);
+  const normalMap = wrapTex(normalFromHeight(height, W, H, 0.9), maxAniso, false);
+  for (const t of [map, roughnessMap, normalMap]) {
+    t.wrapS = t.wrapT = THREE.MirroredRepeatWrapping;
+    t.repeat.set(0.5, 0.9);
+  }
+  return { map, roughnessMap, normalMap };
+}
+
+// Oksydowana / fosforanowana stal: drobne przebarwienia, zmienna szorstkość i mikrostruktura.
 export function metalTextures(maxAniso = 8) {
   const S = 512;
   const cMap = canvas(S, S), cRough = canvas(S, S);
   const a = cMap.getContext('2d'), b = cRough.getContext('2d');
   const ia = a.createImageData(S, S), ib = b.createImageData(S, S);
+  const height = new Float32Array(S * S);
   const n = makeNoise(3), m = makeNoise(17), r = rng(5);
-  let i = 0;
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
-      const blot = n(x * 0.02, y * 0.02) * 0.6 + n(x * 0.07, y * 0.07) * 0.4;
+      const k = y * S + x, i = k * 4;
+      const blot = n(x * 0.015, y * 0.015) * 0.6 + n(x * 0.06, y * 0.06) * 0.4;
       const grain = r();
-      const v = 0.84 + 0.08 * blot + 0.05 * (grain - 0.5);
-      ia.data[i] = 255 * v * 0.95;
-      ia.data[i + 1] = 255 * v * 0.97;
+      const v = 0.86 + 0.07 * blot + 0.04 * (grain - 0.5);
+      ia.data[i] = 255 * v * 0.96;
+      ia.data[i + 1] = 255 * v * 0.98;
       ia.data[i + 2] = 255 * Math.min(1, v * 1.02);
       ia.data[i + 3] = 255;
-      const rv = 0.75 + 0.3 * m(x * 0.03, y * 0.03) + 0.08 * (grain - 0.5);
+      const rv = 0.78 + 0.25 * m(x * 0.025, y * 0.025) + 0.1 * (grain - 0.5);
       ib.data[i] = ib.data[i + 1] = ib.data[i + 2] = 255 * Math.min(1, rv);
       ib.data[i + 3] = 255;
-      i += 4;
+      height[k] = grain * 0.6 + blot * 0.4;
     }
   }
   a.putImageData(ia, 0, 0);
   b.putImageData(ib, 0, 0);
-  const map = new THREE.CanvasTexture(cMap);
-  map.colorSpace = THREE.SRGBColorSpace;
-  const rough = new THREE.CanvasTexture(cRough);
-  for (const t of [map, rough]) {
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.anisotropy = maxAniso;
-  }
-  return { map, rough };
+  const map = wrapTex(cMap, maxAniso, true);
+  const rough = wrapTex(cRough, maxAniso, false);
+  const normal = wrapTex(normalFromHeight(height, S, S, 0.35), maxAniso, false);
+  for (const t of [map, rough, normal]) t.repeat.set(2, 2);
+  return { map, rough, normal };
+}
+
+// Podziałka na ramieniu celownika (nastawy П i 1–10).
+export function sightScaleTexture() {
+  const c = canvas(512, 64);
+  const g = c.getContext('2d');
+  g.fillStyle = '#2a2b2e';
+  g.fillRect(0, 0, 512, 64);
+  g.fillStyle = '#d9d9d9';
+  g.font = 'bold 30px Arial, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  const marks = ['П', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
+  marks.forEach((t, i) => {
+    const x = 470 - i * 42;
+    g.fillText(t, x, 34);
+    g.fillRect(x - 1, 4, 2, 9);
+  });
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
 }
 
 // Błysk z lufy: biały rdzeń przechodzący w czerwień marki.
